@@ -1,0 +1,249 @@
+--// Created By CDHW
+--// 2026-08-23 15:10 CDT
+
+local player = game.Players.LocalPlayer
+local titans = game.Workspace:WaitForChild("Titans")
+local storage = game.ReplicatedStorage
+local tweens = game.TweenService
+
+local POST
+local GET
+local tween
+
+for i, v in storage:GetDescendants() do
+    if v.Name == "POST" and v:IsA("RemoteEvent") then
+        POST = v
+    elseif v.Name == "GET" and v:IsA("RemoteFunction") then
+        GET = v
+    end
+
+    if POST and GET then
+        break
+    end
+end
+
+local function getRoot()
+    if player.Character then
+        return player.Character.PrimaryPart or player.Character:FindFirstChild("HumanoidRootPart")
+    end
+end
+
+local function getNape(titan)
+    local hitboxes = titan:FindFirstChild("Hitboxes")
+
+    if hitboxes then
+        local hit = hitboxes:FindFirstChild("Hit")
+
+        if hit then
+            local nape = hit:FindFirstChild("Nape")
+
+            if nape then
+                return nape
+            end
+        end
+    end
+
+    return titan:FindFirstChild("Nape", true)
+end
+
+local function alive(titan)
+    if not titan or not titan:IsA("Model") then
+        return false
+    end
+
+    local hum = titan:FindFirstChild("Humanoid")
+
+    if hum and hum.Health > 0 then
+        return true
+    end
+
+    return false
+end
+
+local function getTarget()
+    local root = getRoot()
+
+    if not root then
+        return
+    end
+
+    local target
+    local targetnape
+    local distance = math.huge
+
+    for i, titan in titans:GetChildren() do
+        if alive(titan) then
+            local nape = getNape(titan)
+
+            if nape and nape:IsA("BasePart") then
+                local mag = (root.Position - nape.Position).Magnitude
+
+                if mag < distance then
+                    distance = mag
+                    target = titan
+                    targetnape = nape
+                end
+            end
+        end
+    end
+
+    return target, targetnape
+end
+
+local function move(nape)
+    local root = getRoot()
+
+    if not root or not nape then
+        return false
+    end
+
+    if tween then
+        pcall(function()
+            tween:Cancel()
+        end)
+    end
+
+    tween = tweens:Create(
+        root,
+        TweenInfo.new(0.25, Enum.EasingStyle.Quad),
+        {CFrame = nape.CFrame * CFrame.new(0, 0, 5)}
+    )
+
+    tween:Play()
+
+    local worked = pcall(function()
+        tween.Completed:Wait()
+    end)
+
+    tween = nil
+
+    return worked
+end
+
+local function attack(nape)
+    if not POST or not nape then
+        return
+    end
+
+    POST:FireServer("Attacks", "Slash", true)
+    task.wait(0.05)
+    POST:FireServer("Hitboxes", "Register", nape, 50, 0)
+end
+
+local function needsReload()
+    if not player.Character then
+        return false
+    end
+
+    local rig = game.Workspace:FindFirstChild("Rig_" .. player.Character.Name, true) or player.Character
+    local found = false
+
+    for i, v in rig:GetDescendants() do
+        if string.sub(v.Name, 1, 6) == "Blade_" then
+            found = true
+
+            if v:GetAttribute("Broken") == true or not v.Parent then
+                return true
+            end
+        end
+    end
+
+    return not found
+end
+
+local function refill()
+    if not GET then
+        return
+    end
+
+    local root = getRoot()
+
+    if not root then
+        return
+    end
+
+    local closest
+    local distance = math.huge
+
+    for i, v in game.Workspace:GetDescendants() do
+        if v.Name == "Refill" and v:IsA("BasePart") then
+            local mag = (v.Position - root.Position).Magnitude
+
+            if mag < distance then
+                distance = mag
+                closest = v
+            end
+        end
+    end
+
+    if not closest or not POST then
+        GET:InvokeServer("Blades", "Reload")
+        task.wait(0.1)
+        return
+    end
+
+    local old = root.CFrame
+
+    root.CFrame = closest.CFrame * CFrame.new(0, 5, 0)
+
+    task.wait(0.2)
+
+    POST:FireServer("Attacks", "Reload", closest)
+
+    task.wait(2)
+
+    GET:InvokeServer("Blades", "Reload")
+
+    task.wait(0.1)
+
+    root = getRoot()
+
+    if root then
+        root.CFrame = old
+    end
+end
+
+while true do
+    local root = getRoot()
+
+    if not root then
+        task.wait(1)
+        continue
+    end
+
+    if needsReload() == true then
+        refill()
+        task.wait(0.2)
+    end
+
+    local titan, nape = getTarget()
+
+    if not titan or not nape then
+        task.wait(0.5)
+        continue
+    end
+
+    while alive(titan) == true do
+        if not nape or not nape.Parent then
+            nape = getNape(titan)
+        end
+
+        if not nape then
+            break
+        end
+
+        if needsReload() == true then
+            refill()
+        end
+
+        if move(nape) == false then
+            break
+        end
+
+        attack(nape)
+
+        task.wait(0.15)
+    end
+
+    task.wait()
+end
