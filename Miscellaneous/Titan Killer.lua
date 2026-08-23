@@ -1,3 +1,7 @@
+--// Created By CDHW
+--// 2026-08-23 15:20 CDT
+--// https://www.roblox.com/games/13379208636/Attack-on-Titan-Revolution
+
 local player = game.Players.LocalPlayer
 local titans = game.Workspace:WaitForChild("Titans")
 
