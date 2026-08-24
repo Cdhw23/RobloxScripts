@@ -1,0 +1,321 @@
+--// Created By CDHW
+--// https://www.roblox.com/games/6549794549/RH2-The-Journey#!/about
+
+local player = game.Players.LocalPlayer
+
+local UIS = game.UserInputService
+local RS = game.RunService
+local VIM = game:GetService("VirtualInputManager")
+
+local events = game.ReplicatedStorage:WaitForChild("PlayerEvents")
+local magnitude = events:WaitForChild("Magnitude")
+
+--// if you're shooting shitty disable useping
+--// if you're 2 slow and don't know how change true to false
+
+local usePing = true 
+
+local low = 76
+local high = 77
+local window = 0
+
+local target
+local shot
+local family
+local animation
+
+local armed = false
+local fired = false
+local started = 0
+
+local oldPower = 0
+local oldTime = os.clock()
+
+local firstPower
+local firstTime
+local rate = 0
+
+local function getMeter()
+    if not player.Character then
+        return
+    end
+
+    local backpack = player:FindFirstChild("Backpack")
+
+    if not backpack then
+        return
+    end
+
+    local menu = backpack:FindFirstChild("MenuValues")
+    local meterType = menu and menu:FindFirstChild("ShotmeterType")
+    local name = meterType and meterType.Value or "Overhead"
+
+    if name == "On Floor" then
+        return player.PlayerGui:FindFirstChild("Stamina_OnFloor")
+    end
+
+    if name ~= "Overhead" and name ~= "Vertical Bar" and name ~= "Pill" then
+        name = "Overhead"
+    end
+
+    local head = player.Character:FindFirstChild("Head")
+
+    if head then
+        return head:FindFirstChild("MeterUi " .. name)
+    end
+end
+
+local function getShot()
+    if not player.Character then
+        return
+    end
+
+    local hum = player.Character:FindFirstChild("Humanoid")
+
+    if not hum then
+        return
+    end
+
+    local animator = hum:FindFirstChild("Animator")
+
+    if not animator then
+        return
+    end
+
+    for number, track in animator:GetPlayingAnimationTracks() do
+        local anim = track.Animation
+
+        if anim and anim.Parent then
+            local folder = anim.Parent.Name
+
+            if folder == "ShootingAnimations"
+            or folder == "LayupAnimations"
+            or folder == "PostUpAnimations"
+            or folder == "DunkingAnimations" then
+                return folder .. "/" .. anim.Name, folder, anim.Name
+            end
+        end
+    end
+end
+
+local function getGoal(position)
+    local goals = game.Workspace:FindFirstChild("Goals")
+
+    if not goals then
+        return
+    end
+
+    local closest
+    local distance = math.huge
+
+    for number, part in goals:GetDescendants() do
+        if part:IsA("BasePart") and string.sub(part.Name, 1, 4) == "Goal" then
+            local mag = (part.Position - position).Magnitude
+
+            if mag < distance then
+                distance = mag
+                closest = part
+            end
+        end
+    end
+
+    return closest, distance
+end
+
+local function getPing()
+    local ping = game.Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+
+    return ping / 2000
+end
+
+local function release(key, power)
+    VIM:SendKeyEvent(false, key, false, nil)
+
+    task.spawn(function()
+        local time = os.clock()
+
+        while os.clock() - time < 0.35 do
+            RS.Heartbeat:Wait()
+
+            if power.Value <= 0 then
+                break
+            end
+
+            VIM:SendKeyEvent(false, key, false, nil)
+        end
+    end)
+end
+
+local function reset()
+    target = nil
+    shot = nil
+    family = nil
+    animation = nil
+
+    armed = false
+    fired = false
+    started = 0
+
+    oldPower = 0
+    oldTime = os.clock()
+
+    firstPower = nil
+    firstTime = nil
+    rate = 0
+end
+
+magnitude.OnClientEvent:Connect(function(data)
+    if data.Action ~= "Return Green Window" then
+        return
+    end
+
+    local one = tonumber(data.Meter_1)
+    local two = tonumber(data.Meter_2)
+
+    if not one or not two then
+        return
+    end
+
+    if two < one then
+        one, two = two, one
+    end
+
+    if two - one < 1 then
+        two = one + 1
+    end
+
+    low = one
+    high = two
+
+    window = os.clock() + 2.5
+    target = nil
+end)
+
+RS.Heartbeat:Connect(function()
+    if not player.Character then
+        reset()
+        return
+    end
+
+    local backpack = player:FindFirstChild("Backpack")
+
+    if not backpack then
+        reset()
+        return
+    end
+
+    local values = backpack:FindFirstChild("ActionValues")
+    local power = values and values:FindFirstChild("Power")
+
+    if not power then
+        reset()
+        return
+    end
+
+    local meter = getMeter()
+    local dunkMeter = player.PlayerGui:FindFirstChild("Dunk_Meter")
+
+    local holding = UIS:IsKeyDown(Enum.KeyCode.E)
+        or UIS:IsKeyDown(Enum.KeyCode.Space)
+        or UIS:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonX)
+        or UIS:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonY)
+
+    local value = power.Value
+    local now = os.clock()
+
+    local meterUp = meter and meter.Enabled or dunkMeter and dunkMeter.Enabled
+    local hasBall = player.Character:FindFirstChild("BallConnect")
+
+    if armed == false then
+        if not meterUp or not hasBall or value <= 0 or not holding then
+            reset()
+            return
+        end
+
+        armed = true
+        started = now
+    elseif now - started > 0.15 then
+        if value <= 0 or not meterUp or not hasBall then
+            reset()
+            return
+        end
+    end
+
+    if value ~= oldPower then
+        if not firstTime and value > 0 then
+            firstPower = value
+            firstTime = now
+        elseif value > oldPower and now - firstTime >= 0.05 then
+            rate = (value - firstPower) / (now - firstTime)
+        end
+
+        oldPower = value
+        oldTime = now
+    end
+
+    if fired == true or rate <= 0 then
+        return
+    end
+
+    if not shot then
+        shot, family, animation = getShot()
+
+        if not shot then
+            return
+        end
+    end
+
+    if not target then
+        if now > window then
+            low = 76
+            high = 77
+        end
+
+        target = (low + high) / 2
+    end
+
+    if family == "DunkingAnimations" then
+        local root = player.Character:FindFirstChild("HumanoidRootPart")
+
+        if root then
+            local minimum = 0
+
+            if animation and string.sub(animation, 1, 10) == "MovingDunk" then
+                minimum = 7.5
+            elseif animation and string.sub(animation, 1, 12) == "StandingDunk" then
+                minimum = 4.5
+            end
+
+            if minimum > 0 then
+                local goal, distance = getGoal(root.Position)
+
+                if goal and distance <= minimum then
+                    return
+                end
+            end
+        end
+    end
+
+    local predicted = value + rate * (now - oldTime)
+    local releaseAt = target
+
+    if usePing == true then
+        local ping = getPing()
+
+        if family == "LayupAnimations" then
+            ping = ping + 0.1
+        end
+
+        releaseAt = target - rate * ping
+    end
+
+    if predicted >= releaseAt then
+        fired = true
+
+        if family == "DunkingAnimations" then
+            release(Enum.KeyCode.Space, power)
+        else
+            release(Enum.KeyCode.E, power)
+        end
+    end
+end)
