@@ -1,205 +1,257 @@
 --// Created By CDHW
---// https://www.roblox.com/games/6549794549/RH2-The-Journey#!/about
+--// Them Basketball Hubs Finna Skid My Shit Dawg
+https://www.roblox.com/games/6549794549/RH2-The-Journey
 
-local player = game.Players.LocalPlayer
 
-local UIS = game.UserInputService
-local RS = game.RunService
-local VIM = game:GetService("VirtualInputManager")
+local remote, lastAction, lastDetail
+local lastRemote = 0
+local releases = {}
+local sending = false
 
-local events = game.ReplicatedStorage:WaitForChild("PlayerEvents")
-local magnitude = events:WaitForChild("Magnitude")
+local ping = 80
+local biases = {}
+local low, high, window = 76, 77, 0
 
---// if you're shooting shitty disable useping
---// if you're 2 slow and don't know how change true to false
-
-local usePing = true 
-
-local low = 76
-local high = 77
-local window = 0
-
-local target
-local shot
-local family
-local animation
-
-local armed = false
-local fired = false
+local family, animation
+local armed, fired = false, false
 local started = 0
-
-local oldPower = 0
-local oldTime = os.clock()
-
-local firstPower
-local firstTime
+local pending
+local oldPower, oldTime = 0, os.clock()
+local firstPower, firstTime
 local rate = 0
 
-local function getMeter()
-    if not player.Character then
-        return
+if hookmetamethod and getnamecallmethod then
+    local old
+
+    local function hook(self, ...)
+        if getnamecallmethod() == "FireServer" then
+            local state, action, detail = ...
+            local shooting = action == "Shooting" or action == "Moving Dunk" or action == "Standing Dunk"
+                or action == "Moving AO Dunk" or action == "Standing AO Dunk"
+
+            if shooting and state == true then
+                remote = self
+                lastAction = action
+                lastDetail = detail
+                lastRemote = os.clock()
+            elseif shooting and state == false and sending == false and self == remote and lastAction then
+                releases[lastAction .. ":" .. tostring(lastDetail)] = {action, detail}
+            end
+        end
+
+        return old(self, ...)
     end
 
-    local backpack = player:FindFirstChild("Backpack")
-
-    if not backpack then
-        return
-    end
-
-    local menu = backpack:FindFirstChild("MenuValues")
-    local meterType = menu and menu:FindFirstChild("ShotmeterType")
-    local name = meterType and meterType.Value or "Overhead"
-
-    if name == "On Floor" then
-        return player.PlayerGui:FindFirstChild("Stamina_OnFloor")
-    end
-
-    if name ~= "Overhead" and name ~= "Vertical Bar" and name ~= "Pill" then
-        name = "Overhead"
-    end
-
-    local head = player.Character:FindFirstChild("Head")
-
-    if head then
-        return head:FindFirstChild("MeterUi " .. name)
-    end
+    old = hookmetamethod(game, "__namecall", newcclosure and newcclosure(hook) or hook)
 end
 
-local function getShot()
-    if not player.Character then
-        return
-    end
+local function getShot(char)
+    local hum = char:FindFirstChild("Humanoid")
+    local animator = hum and hum:FindFirstChild("Animator")
 
-    local hum = player.Character:FindFirstChild("Humanoid")
+    if animator then
+        for number, track in animator:GetPlayingAnimationTracks() do
+            local anim = track.Animation
 
-    if not hum then
-        return
-    end
+            if anim then
+                local folder = anim.Parent
+                local found
 
-    local animator = hum:FindFirstChild("Animator")
+                while folder and folder ~= game do
+                    local name = folder.Name
 
-    if not animator then
-        return
-    end
+                    if name == "ShootingAnimations" or name == "LayupAnimations" or name == "FloaterAnimations"
+                    or name == "PostUpAnimations" or name == "DunkingAnimations" then
+                        found = name
+                        break
+                    end
 
-    for number, track in animator:GetPlayingAnimationTracks() do
-        local anim = track.Animation
+                    folder = folder.Parent
+                end
 
-        if anim and anim.Parent then
-            local folder = anim.Parent.Name
+                local name = anim.Name
+                local good = found == "ShootingAnimations" and (name == "Jumpshot" or name == "Freethrow_Shot" or string.sub(name, 1, 9) == "Jumpshot_")
+                    or found == "LayupAnimations" and string.find(name, "Layup", 1, true) and not string.find(name, "Clutch", 1, true)
+                    or found == "FloaterAnimations" and string.find(name, "Floater", 1, true)
+                    or found == "PostUpAnimations" and (string.find(name, "PostFade", 1, true) or string.find(name, "Hook", 1, true) and not string.find(name, "Fake", 1, true))
+                    or found == "DunkingAnimations" and (string.sub(name, 1, 10) == "MovingDunk" or string.sub(name, 1, 12) == "StandingDunk")
 
-            if folder == "ShootingAnimations"
-            or folder == "LayupAnimations"
-            or folder == "PostUpAnimations"
-            or folder == "DunkingAnimations" then
-                return folder .. "/" .. anim.Name, folder, anim.Name
+                if good then
+                    return found, name
+                end
             end
         end
     end
 end
 
-local function getGoal(position)
-    local goals = game.Workspace:FindFirstChild("Goals")
+local function release(char)
+    if typeof(remote) ~= "Instance" or not remote:IsA("RemoteEvent") or not remote.Parent then
+        remote = nil
 
-    if not goals then
-        return
-    end
+        local rh2 = rawget(_G, "RH2_Remotes")
+        local found = rh2 and rh2.Shooting_RE
 
-    local closest
-    local distance = math.huge
+        if typeof(found) == "Instance" and found:IsA("RemoteEvent") then
+            remote = found
+        elseif getgc then
+            for number, object in getgc(true) do
+                if type(object) == "table" then
+                    found = rawget(object, "Shooting_RE")
 
-    for number, part in goals:GetDescendants() do
-        if part:IsA("BasePart") and string.sub(part.Name, 1, 4) == "Goal" then
-            local mag = (part.Position - position).Magnitude
-
-            if mag < distance then
-                distance = mag
-                closest = part
+                    if typeof(found) == "Instance" and found:IsA("RemoteEvent") then
+                        remote = found
+                        break
+                    end
+                end
             end
         end
     end
 
-    return closest, distance
-end
+    if not remote then
+        return false
+    end
 
-local function getPing()
-    local ping = game.Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    local action
+    local detail
+    local saved = lastAction and releases[lastAction .. ":" .. tostring(lastDetail)]
 
-    return ping / 2000
-end
+    if os.clock() - lastRemote < 3 then
+        if saved then
+            action, detail = saved[1], saved[2]
+        else
+            action, detail = lastAction, lastDetail
 
-local function release(key, power)
-    VIM:SendKeyEvent(false, key, false, nil)
+            if action == "Shooting" and detail == "Side Post Hook" then
+                detail = "Close Post Hook"
+            end
+        end
+    end
 
-    task.spawn(function()
-        local time = os.clock()
+    if not action then
+        if family == "DunkingAnimations" then
+            detail = tonumber(string.match(animation, "(%d+)$")) or 1
+            action = string.sub(animation, 1, 10) == "MovingDunk" and "Moving Dunk" or "Standing Dunk"
+        elseif family == "ShootingAnimations" then
+            action = "Shooting"
 
-        while os.clock() - time < 0.35 do
-            RS.Heartbeat:Wait()
+            if animation == "Freethrow_Shot" then
+                detail = "Freethrow"
+            elseif animation == "Jumpshot" then
+                detail = char.Humanoid.MoveDirection.Magnitude > 0.05 and "Moving Shot" or "Standing Shot"
+            else
+                detail = "Moving Shot"
+            end
+        elseif family == "LayupAnimations" then
+            action = "Shooting"
 
-            if power.Value <= 0 then
-                break
+            if string.find(animation, "ReverseLayup", 1, true) then
+                detail = "Reverse Layup"
+            elseif string.find(animation, "CloseLayup", 1, true) then
+                detail = "Close Layup"
+            elseif animation == "RH_Layup" or animation == "LH_Layup" then
+                detail = "Layup"
+            elseif string.find(animation, "Standing_Layup", 1, true) then
+                detail = char:FindFirstChild("CanCatchLob_Val") and "Standing AO Layup" or "Standing Layup"
+            end
+        elseif family == "FloaterAnimations" then
+            action = "Shooting"
+            detail = string.find(animation, "CloseFloater", 1, true) and "Close Floater" or "Floater"
+        elseif family == "PostUpAnimations" then
+            action = "Shooting"
+            local root = char:FindFirstChild("HumanoidRootPart")
+            local distance = math.huge
+            local goals = game.Workspace:FindFirstChild("Goals")
+
+            if root and goals then
+                for number, part in goals:GetDescendants() do
+                    if part:IsA("BasePart") and string.sub(part.Name, 1, 4) == "Goal" then
+                        local mag = (part.Position - root.Position).Magnitude
+
+                        if mag < distance then
+                            distance = mag
+                        end
+                    end
+                end
             end
 
-            VIM:SendKeyEvent(false, key, false, nil)
+            if string.find(animation, "Hook", 1, true) then
+                detail = distance < 15 and "Close Post Hook" or "Post Hook"
+            else
+                detail = distance < 15 and "Close Post Fade" or "Post Fade"
+            end
         end
-    end)
+    end
+
+    if not action or detail == nil then
+        return false
+    end
+
+    sending = true
+    remote:FireServer(false, action, detail)
+    sending = false
+    return true
 end
 
 local function reset()
-    target = nil
-    shot = nil
-    family = nil
-    animation = nil
-
-    armed = false
-    fired = false
+    family, animation = nil, nil
+    armed, fired = false, false
     started = 0
-
-    oldPower = 0
-    oldTime = os.clock()
-
-    firstPower = nil
-    firstTime = nil
+    oldPower, oldTime = 0, os.clock()
+    firstPower, firstTime = nil, nil
     rate = 0
 end
 
-magnitude.OnClientEvent:Connect(function(data)
-    if data.Action ~= "Return Green Window" then
-        return
+game.ReplicatedStorage:WaitForChild("PlayerEvents"):WaitForChild("Magnitude").OnClientEvent:Connect(function(data)
+    if data.Action == "Return Green Window" then
+        local one = tonumber(data.Meter_1)
+        local two = tonumber(data.Meter_2)
+
+        if one and two then
+            if two < one then
+                one, two = two, one
+            end
+
+            low = one
+            high = two - one < 1 and one + 1 or two
+            window = os.clock() + 2.5
+        end
     end
-
-    local one = tonumber(data.Meter_1)
-    local two = tonumber(data.Meter_2)
-
-    if not one or not two then
-        return
-    end
-
-    if two < one then
-        one, two = two, one
-    end
-
-    if two - one < 1 then
-        two = one + 1
-    end
-
-    low = one
-    high = two
-
-    window = os.clock() + 2.5
-    target = nil
 end)
 
-RS.Heartbeat:Connect(function()
-    if not player.Character then
-        reset()
+game.ReplicatedStorage:WaitForChild("PlayerEvents"):WaitForChild("ShotFeedBack").OnClientEvent:Connect(function(registered, _, perfect)
+    if registered == "SetTargetBar" then
         return
     end
 
-    local backpack = player:FindFirstChild("Backpack")
+    local shot = pending
+    pending = nil
 
-    if not backpack then
+    if not shot or perfect or typeof(registered) ~= "number" or os.clock() - shot.time > 3 then
+        return
+    end
+
+    local lag = (registered - shot.power) / shot.rate
+
+    if lag >= -0.05 and lag <= 0.65 then
+        local wanted = math.clamp(lag - shot.ping, -0.025, 0.15)
+        local old = biases[shot.name]
+        biases[shot.name] = old and old + (wanted - old) * 0.35 or wanted
+    end
+end)
+
+task.spawn(function()
+    while true do
+        local value = game.Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+        ping = ping + (value - ping) * 0.25
+        task.wait(0.25)
+    end
+end)
+
+game.RunService.Heartbeat:Connect(function()
+    local char = game.Players.LocalPlayer.Character
+    local backpack = game.Players.LocalPlayer:FindFirstChild("Backpack")
+
+    if not char or not backpack then
         reset()
         return
     end
@@ -212,33 +264,39 @@ RS.Heartbeat:Connect(function()
         return
     end
 
-    local meter = getMeter()
-    local dunkMeter = player.PlayerGui:FindFirstChild("Dunk_Meter")
+    local menu = backpack:FindFirstChild("MenuValues")
+    local meterType = menu and menu:FindFirstChild("ShotmeterType")
+    local meterName = meterType and meterType.Value or "Overhead"
+    local meter
 
-    local holding = UIS:IsKeyDown(Enum.KeyCode.E)
-        or UIS:IsKeyDown(Enum.KeyCode.Space)
-        or UIS:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonX)
-        or UIS:IsGamepadButtonDown(Enum.UserInputType.Gamepad1, Enum.KeyCode.ButtonY)
+    if meterName == "On Floor" then
+        meter = game.Players.LocalPlayer.PlayerGui:FindFirstChild("Stamina_OnFloor")
+    else
+        if meterName ~= "Overhead" and meterName ~= "Vertical Bar" and meterName ~= "Pill" then
+            meterName = "Overhead"
+        end
 
+        local head = char:FindFirstChild("Head")
+        meter = head and head:FindFirstChild("MeterUi " .. meterName)
+    end
+
+    local dunkMeter = game.Players.LocalPlayer.PlayerGui:FindFirstChild("Dunk_Meter")
+    local meterUp = meter and meter.Enabled or dunkMeter and dunkMeter.Enabled
+    local hasBall = char:FindFirstChild("BallConnect")
     local value = power.Value
     local now = os.clock()
 
-    local meterUp = meter and meter.Enabled or dunkMeter and dunkMeter.Enabled
-    local hasBall = player.Character:FindFirstChild("BallConnect")
-
-    if armed == false then
-        if not meterUp or not hasBall or value <= 0 or not holding then
+    if not armed then
+        if not meterUp or not hasBall or value <= 0 then
             reset()
             return
         end
 
         armed = true
         started = now
-    elseif now - started > 0.15 then
-        if value <= 0 or not meterUp or not hasBall then
-            reset()
-            return
-        end
+    elseif now - started > 0.15 and (value <= 0 or not meterUp or not hasBall) then
+        reset()
+        return
     end
 
     if value ~= oldPower then
@@ -253,69 +311,54 @@ RS.Heartbeat:Connect(function()
         oldTime = now
     end
 
-    if fired == true or rate <= 0 then
+    if fired or rate <= 0 then
         return
     end
 
-    if not shot then
-        shot, family, animation = getShot()
+    if not family then
+        family, animation = getShot(char)
 
-        if not shot then
+        if not family then
             return
         end
     end
 
-    if not target then
-        if now > window then
-            low = 76
-            high = 77
-        end
-
-        target = (low + high) / 2
-    end
-
     if family == "DunkingAnimations" then
-        local root = player.Character:FindFirstChild("HumanoidRootPart")
+        local root = char:FindFirstChild("HumanoidRootPart")
+        local goals = game.Workspace:FindFirstChild("Goals")
 
-        if root then
-            local minimum = 0
+        if root and goals then
+            local distance = math.huge
 
-            if animation and string.sub(animation, 1, 10) == "MovingDunk" then
-                minimum = 7.5
-            elseif animation and string.sub(animation, 1, 12) == "StandingDunk" then
-                minimum = 4.5
-            end
+            for number, part in goals:GetDescendants() do
+                if part:IsA("BasePart") and string.sub(part.Name, 1, 4) == "Goal" then
+                    local mag = (part.Position - root.Position).Magnitude
 
-            if minimum > 0 then
-                local goal, distance = getGoal(root.Position)
-
-                if goal and distance <= minimum then
-                    return
+                    if mag < distance then
+                        distance = mag
+                    end
                 end
             end
+
+            if distance <= (string.sub(animation, 1, 10) == "MovingDunk" and 7.5 or 4.5) then
+                return
+            end
         end
     end
 
-    local predicted = value + rate * (now - oldTime)
-    local releaseAt = target
+    local shot = family .. "/" .. animation
+    local target = now < window and (low + high) / 2 or 76.5
+    local oneWay = ping / 2000
+    local lead = math.clamp(oneWay + (biases[shot] or 0.005), 0, 0.5)
+    local predicted = value + rate * math.min(now - oldTime, 0.08)
 
-    if usePing == true then
-        local ping = getPing()
-
-        if family == "LayupAnimations" then
-            ping = ping + 0.1
-        end
-
-        releaseAt = target - rate * ping
-    end
-
-    if predicted >= releaseAt then
+    if predicted >= target - rate * lead then
         fired = true
+        pending = {name = shot, power = predicted, rate = rate, ping = oneWay, time = now}
 
-        if family == "DunkingAnimations" then
-            release(Enum.KeyCode.Space, power)
-        else
-            release(Enum.KeyCode.E, power)
+        if release(char) == false then
+            fired = false
+            pending = nil
         end
     end
 end)
