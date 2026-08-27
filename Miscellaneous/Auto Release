@@ -1,7 +1,6 @@
 --// Created By CDHW
 --// Them Basketball Hubs Finna Skid My Shit Dawg
-https://www.roblox.com/games/6549794549/RH2-The-Journey
-
+--//https://www.roblox.com/games/6549794549/RH2-The-Journey
 
 local remote, lastAction, lastDetail
 local lastRemote = 0
