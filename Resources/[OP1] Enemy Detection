@@ -1,0 +1,92 @@
+--// Made By Kohrynth
+--// Free To Use 
+
+local targets = {}
+local viewmodels
+
+local parts = {
+    "torso",
+    "head",
+    "shoulder1",
+    "shoulder2",
+    "arm1",
+    "arm2",
+    "hip1",
+    "hip2",
+    "leg1",
+    "leg2"
+}
+
+local function valid(model)
+    if not viewmodels then
+        return false
+    end
+
+    if not model or not model:IsA("Model") then
+        return false
+    end
+
+    if model.Parent ~= viewmodels then
+        return false
+    end
+
+    if model.Name == "LocalViewmodel" then
+        return false
+    end
+
+    for number, name in parts do
+        local part = model:FindFirstChild(name)
+
+        if not part or not part:IsA("BasePart") then
+            return false
+        end
+    end
+
+    local torso = model:FindFirstChild("torso")
+
+    if torso.Transparency >= 1 then
+        return false
+    end
+
+    return true
+end
+
+local function teammate(model)
+    for number, object in game.Workspace:GetChildren() do
+        if object:IsA("Highlight") and object.Enabled and object.Adornee == model then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function update()
+    viewmodels = game.Workspace:FindFirstChild("Viewmodels")
+
+    if not viewmodels then
+        return
+    end
+
+    for number, model in viewmodels:GetChildren() do
+        if valid(model) then
+            targets[model] = true
+        end
+    end
+end
+
+local function getEnemies()
+    update()
+
+    local enemies = {}
+
+    for model in targets do
+        if not valid(model) then
+            targets[model] = nil
+        elseif teammate(model) == false then
+            enemies[#enemies + 1] = model
+        end
+    end
+
+    return enemies
+end
