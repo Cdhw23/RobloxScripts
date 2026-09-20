@@ -1,0 +1,106 @@
+
+--// Created By Kohrynth/Cdcdw or wtv its called
+
+local player = game.Players.LocalPlayer
+local RS = game.RunService
+
+if getgenv().v then
+    getgenv().v:Disconnect()
+end
+
+local lastCatch = 0
+
+local function getBall(root)
+    local closest
+    local distance = math.huge
+
+    for number, ball in game.Workspace:GetChildren() do
+        if ball:IsA("BasePart") and (ball.Name == "Football" or ball.Name == "KBall") then
+            local mag = (ball.Position - root.Position).Magnitude
+
+            if mag < distance then
+                distance = mag
+                closest = ball
+            end
+        end
+    end
+
+    return closest, distance
+end
+
+local function getCatch()
+    if not player.Character then
+        return
+    end
+
+    local catch = player.Character:FindFirstChild("Catch")
+
+    if catch then
+        return catch:FindFirstChild("RemoteEvent")
+    end
+end
+
+getgenv().v = RS.Heartbeat:Connect(function()
+    if not player.Character then
+        return
+    end
+
+    if player.Character:FindFirstChild("Football") then
+        return
+    end
+
+    local root = player.Character:FindFirstChild("HumanoidRootPart")
+
+    if not root then
+        return
+    end
+
+    local ball, distance = getBall(root)
+
+    if not ball then
+        return
+    end
+
+    local speed = ball.AssemblyLinearVelocity.Magnitude
+    local range = root.Size.Magnitude * 3 + math.clamp(speed * 0.06, 0, root.Size.Magnitude * 3)
+
+    if distance > range then
+        return
+    end
+
+    local catch = getCatch()
+
+    if catch and os.clock() - lastCatch > 0.15 then
+        lastCatch = os.clock()
+
+        catch:FireServer(true)
+
+        task.delay(0.12, function()
+            if catch.Parent then
+                catch:FireServer(false)
+            end
+        end)
+    end
+
+    if isnetworkowner and not isnetworkowner(ball) then
+        return
+    end
+
+    local offset = root.Position - ball.Position
+    local mag = offset.Magnitude
+
+    if mag <= 0 then
+        return
+    end
+
+    ball.AssemblyLinearVelocity = offset.Unit * math.max(speed, mag * 14)
+
+    if mag <= math.max(root.Size.Magnitude * 2, ball.Size.Magnitude * 3) then
+        if firetouchinterest then
+            firetouchinterest(root, ball, 0)
+            firetouchinterest(root, ball, 1)
+        end
+
+        ball.CFrame = CFrame.new(root.Position) * ball.CFrame.Rotation
+    end
+end)
