@@ -1,14 +1,34 @@
-
 --// Created By Kohrynth/Cdcdw or wtv its called
 
 local player = game.Players.LocalPlayer
 local RS = game.RunService
 
+local RANGE = 55
+
 if getgenv().v then
     getgenv().v:Disconnect()
 end
 
-local lastCatch = 0
+if getgenv().a then
+    getgenv().a:Disconnect()
+end
+
+if getgenv().c then
+    getgenv().c:Disconnect()
+end
+
+local catching = false
+local tracks = {}
+local animations = {}
+local animationIds = {}
+
+local catchNames = {
+    Mid = true,
+    High = true,
+    Low = true,
+    Left = true,
+    Right = true
+}
 
 local function getBall(root)
     local closest
@@ -28,19 +48,138 @@ local function getBall(root)
     return closest, distance
 end
 
-local function getCatch()
-    if not player.Character then
+local function getHand(character, ball)
+    local right = character:FindFirstChild("RightHand")
+        or character:FindFirstChild("Right Arm")
+
+    local left = character:FindFirstChild("LeftHand")
+        or character:FindFirstChild("Left Arm")
+
+    if right and left then
+        local rightDistance = (ball.Position - right.Position).Magnitude
+        local leftDistance = (ball.Position - left.Position).Magnitude
+
+        if rightDistance < leftDistance then
+            return right
+        else
+            return left
+        end
+    end
+
+    return right or left
+end
+
+local function updateCatch()
+    catching = next(tracks) ~= nil
+end
+
+local function isCatch(track)
+    if not track.Animation then
+        return false
+    end
+
+    if animations[track.Animation] then
+        return true
+    end
+
+    if animationIds[track.Animation.AnimationId] then
+        return true
+    end
+
+    return false
+end
+
+local function catchTrack(track)
+    if not isCatch(track) then
         return
     end
 
-    local catch = player.Character:FindFirstChild("Catch")
+    tracks[track] = true
+    updateCatch()
 
-    if catch then
-        return catch:FindFirstChild("RemoteEvent")
+    local stopped
+
+    stopped = track.Stopped:Connect(function()
+        tracks[track] = nil
+        updateCatch()
+
+        if stopped then
+            stopped:Disconnect()
+        end
+    end)
+end
+
+local function setup(character)
+    animations = {}
+    animationIds = {}
+    tracks = {}
+    catching = false
+
+    if getgenv().a then
+        getgenv().a:Disconnect()
+        getgenv().a = nil
+    end
+
+    local humanoid = character:WaitForChild("Humanoid", 10)
+
+    if not humanoid then
+        return
+    end
+
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+
+    if not animator then
+        animator = humanoid:WaitForChild("Animator", 10)
+    end
+
+    if not animator then
+        return
+    end
+
+    local catch = character:WaitForChild("Catch", 10)
+
+    if not catch then
+        return
+    end
+
+    local client = catch:WaitForChild("c", 10)
+
+    if not client then
+        return
+    end
+
+    for number, animation in client:GetChildren() do
+        if animation:IsA("Animation") and catchNames[animation.Name] then
+            animations[animation] = true
+
+            if animation.AnimationId ~= "" then
+                animationIds[animation.AnimationId] = true
+            end
+        end
+    end
+
+    getgenv().a = animator.AnimationPlayed:Connect(function(track)
+        catchTrack(track)
+    end)
+
+    for number, track in animator:GetPlayingAnimationTracks() do
+        catchTrack(track)
     end
 end
 
+if player.Character then
+    task.spawn(setup, player.Character)
+end
+
+getgenv().c = player.CharacterAdded:Connect(function(character)
+    task.spawn(setup, character)
+end)
+
 getgenv().v = RS.Heartbeat:Connect(function()
+    if not catching then
+        return
+    end
+
     if not player.Character then
         return
     end
@@ -61,46 +200,27 @@ getgenv().v = RS.Heartbeat:Connect(function()
         return
     end
 
-    local speed = ball.AssemblyLinearVelocity.Magnitude
-    local range = root.Size.Magnitude * 3 + math.clamp(speed * 0.06, 0, root.Size.Magnitude * 3)
-
-    if distance > range then
+    if distance > RANGE then
         return
-    end
-
-    local catch = getCatch()
-
-    if catch and os.clock() - lastCatch > 0.15 then
-        lastCatch = os.clock()
-
-        catch:FireServer(true)
-
-        task.delay(0.12, function()
-            if catch.Parent then
-                catch:FireServer(false)
-            end
-        end)
     end
 
     if isnetworkowner and not isnetworkowner(ball) then
         return
     end
 
-    local offset = root.Position - ball.Position
-    local mag = offset.Magnitude
+    local hand = getHand(player.Character, ball)
 
-    if mag <= 0 then
+    if not hand then
         return
     end
 
-    ball.AssemblyLinearVelocity = offset.Unit * math.max(speed, mag * 14)
-
-    if mag <= math.max(root.Size.Magnitude * 2, ball.Size.Magnitude * 3) then
-        if firetouchinterest then
-            firetouchinterest(root, ball, 0)
-            firetouchinterest(root, ball, 1)
-        end
-
-        ball.CFrame = CFrame.new(root.Position) * ball.CFrame.Rotation
+    if firetouchinterest then
+        firetouchinterest(hand, ball, 0)
+        firetouchinterest(hand, ball, 1)
     end
+
+    ball.AssemblyLinearVelocity = Vector3.zero
+    ball.AssemblyAngularVelocity = Vector3.zero
+
+    ball.CFrame = hand.CFrame
 end)
