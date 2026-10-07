@@ -3,7 +3,6 @@
 
 local player = game.Players.LocalPlayer
 local RS = game.RunService
-local ReplicatedStorage = game.ReplicatedStorage
 
 local lastPerfect
 
@@ -18,53 +17,9 @@ end
 local function getState()
     local states = game.Workspace:FindFirstChild("States")
 
-    if not states then
-        return
+    if states then
+        return states:FindFirstChild(player.Name)
     end
-
-    return states:FindFirstChild(player.Name)
-end
-
-local function getOpponent()
-    local state = getState()
-
-    if not state then
-        return
-    end
-
-    local occupied = state:FindFirstChild("Occupied")
-
-    if not occupied then
-        return
-    end
-
-    local locked = occupied:FindFirstChild("LockedOn")
-
-    if locked then
-        return locked.Value
-    end
-end
-
-local function dashing()
-    local state = getState()
-
-    if not state then
-        return false
-    end
-
-    local occupied = state:FindFirstChild("Occupied")
-
-    if not occupied then
-        return false
-    end
-
-    local dash = occupied:FindFirstChild("Dashing")
-
-    if dash then
-        return dash.Value
-    end
-
-    return false
 end
 
 local function dodge()
@@ -86,30 +41,43 @@ local function dodge()
         return
     end
 
-    local opponent = getOpponent()
+    local state = getState()
 
-    if not opponent then
+    if not state then
         return
     end
 
-    if opponent:GetAttribute("IsFeinting") == true or opponent:GetAttribute("LocalIsFeinting") == true then
+    local occupied = state:FindFirstChild("Occupied")
+
+    if not occupied then
+        return
+    end
+
+    local locked = occupied:FindFirstChild("LockedOn")
+    local dashing = occupied:FindFirstChild("Dashing")
+
+    if not locked or not locked.Value then
+        return
+    end
+
+    if dashing and dashing.Value then
+        return
+    end
+
+    local enemy = locked.Value
+
+    if enemy:GetAttribute("IsFeinting") == true or enemy:GetAttribute("LocalIsFeinting") == true then
         return
     end
 
     local root = character:FindFirstChild("HumanoidRootPart")
-    local eroot = opponent:FindFirstChild("HumanoidRootPart")
+    local eroot = enemy:FindFirstChild("HumanoidRootPart")
 
-    if root and eroot then
-        if (root.Position - eroot.Position).Magnitude > 14 then
-            return
-        end
-    end
-
-    if dashing() then
+    if root and eroot and (root.Position - eroot.Position).Magnitude > 14 then
         return
     end
 
-    local events = ReplicatedStorage:FindFirstChild("Events")
+    local events = game.ReplicatedStorage:FindFirstChild("Events")
     local dash = events and events:FindFirstChild("ForceDash")
 
     if not dash then
@@ -121,24 +89,30 @@ local function dodge()
     dash:Fire({Direction = direction})
 
     RS.Heartbeat:Once(function()
-        if player.Character == character and character:GetAttribute("Perfect") == perfect and not dashing() then
+        local state = getState()
+        local occupied = state and state:FindFirstChild("Occupied")
+        local dashing = occupied and occupied:FindFirstChild("Dashing")
+
+        if player.Character == character and character:GetAttribute("Perfect") == perfect and (not dashing or dashing.Value == false) then
             dash:Fire({Direction = direction})
         end
     end)
 
     RS.Heartbeat:Once(function()
-        if player.Character == character and character:GetAttribute("Perfect") == perfect and not dashing() then
+        local state = getState()
+        local occupied = state and state:FindFirstChild("Occupied")
+        local dashing = occupied and occupied:FindFirstChild("Dashing")
+
+        if player.Character == character and character:GetAttribute("Perfect") == perfect and (not dashing or dashing.Value == false) then
             dash:Fire({Direction = direction})
         end
     end)
 end
 
 getgenv().dodge = RS.Heartbeat:Connect(function()
-    if not player.Character then
-        return
+    if player.Character then
+        dodge()
     end
-
-    dodge()
 end)
 
 getgenv().dodgeChar = player.CharacterAdded:Connect(function()
