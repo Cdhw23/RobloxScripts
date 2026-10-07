@@ -1,0 +1,438 @@
+--// Created By CDHW/Kohrynth
+--// Road To Glory
+
+local player = game.Players.LocalPlayer
+local RS = game.RunService
+local UIS = game.UserInputService
+local rep = game.ReplicatedStorage
+local range, walkspeed, jumppower, strength, passgravity = 18, 29, 61, .9, 72
+
+if getgenv().rtg then
+    getgenv().rtg:Disconnect()
+end
+
+if getgenv().rtgChar then
+    getgenv().rtgChar:Disconnect()
+end
+
+if getgenv().rtgJump then
+    getgenv().rtgJump:Disconnect()
+end
+
+if getgenv().rtgAdd then
+    getgenv().rtgAdd:Disconnect()
+end
+
+if getgenv().rtgRemove then
+    getgenv().rtgRemove:Disconnect()
+end
+
+local character, humanoid, root, session
+local footballremote, hitboxremote
+local balls, visuals, touches = {}, {}, {}
+local pullball, pullpos, pullvel, pullsample = nil, nil, Vector3.zero, 0
+local lastcatch, pulling, throwing, jump, lastjump = 0, false, 0, 0, 0
+
+local physics = rep:FindFirstChild("FootballPhysics",true)
+
+if physics then
+    local module = require(physics)
+    if type(module) == "table" then
+        passgravity = math.abs(tonumber(module.PassGravity) or passgravity)
+    end
+end
+
+local function getData()
+    local x = rep:FindFirstChild("PlayerDataStorage")
+    return x and x:FindFirstChild(tostring(player.UserId))
+end
+
+local function getBuild(name)
+    local data = getData()
+    local build = data and data:FindFirstChild("Build")
+    local ratings = build and build:FindFirstChild("Ratings")
+    local x = (ratings and ratings:FindFirstChild(name)) or (build and build:FindFirstChild(name))
+    return x and x:IsA("ValueBase") and tonumber(x.Value) or nil
+end
+
+local function bool(parent,name)
+    local x = parent and parent:FindFirstChild(name)
+    return x and x:IsA("BoolValue") and x.Value or false
+end
+
+local function remote(name)
+    local service = rep:FindFirstChild(name,true)
+    local events = service and service:FindFirstChild("RE")
+    local event = events and events:FindFirstChild("Event")
+
+    if event and event:IsA("RemoteEvent") then
+        return event
+    end
+end
+
+local function footballRemote()
+    if not footballremote or not footballremote.Parent then
+        footballremote = remote("FootballService")
+    end
+    return footballremote
+end
+
+local function hitboxRemote()
+    if not hitboxremote or not hitboxremote.Parent then
+        hitboxremote = remote("HitboxService")
+    end
+    return hitboxremote
+end
+
+local function hasBall()
+    if not character then return false end
+    if character:GetAttribute("HasFootball") == true then return true end
+    if character:FindFirstChild("Football") or character:FindFirstChild("KBall") then return true end
+
+    for _,v in character:GetChildren() do
+        if v:IsA("BasePart") and v:FindFirstChild("BallData") then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function isBall(v)
+    if not v or (not v:IsA("BasePart") and not v:IsA("Model")) or v:GetAttribute("ClientVisual") == true then
+        return false
+    end
+
+    return v.Name == "Football" or v.Name == "KBall" or v.Name == "Kickoff" or v.Name == "FieldGoal" or v.Name == "GameBall" or v:FindFirstChild("BallData") ~= nil
+end
+
+local function isVisual(v)
+    if not v or (not v:IsA("BasePart") and not v:IsA("Model")) then return false end
+    return v.Name == "GhostFootball" or (v.Name == "ClientFootballVisual" and v:GetAttribute("ClientVisual") == true)
+end
+
+local function addBall(v)
+    local visual = v.Name == "ReplaySourceBall" and v.Parent or v
+    if isVisual(visual) then
+        visuals[visual] = true
+        return
+    end
+
+    local ball = v.Name == "BallData" and v.Parent or v
+    if isBall(ball) then balls[ball] = true end
+end
+
+local function pos(v)
+    if not v or not v.Parent then return end
+    if v:IsA("BasePart") then return v.Position end
+    if v:IsA("Model") then return v:GetPivot().Position end
+end
+
+local function ballPos(ball)
+    for v in visuals do
+        if not v.Parent then
+            visuals[v] = nil
+        else
+            local x = v:FindFirstChild("ReplaySourceBall")
+            if x and x:IsA("ObjectValue") and x.Value == ball then
+                return pos(v)
+            end
+        end
+    end
+    return pos(ball)
+end
+
+local function getBall()
+    if not root then return end
+
+    local closest, distance = nil, math.huge
+
+    for ball in balls do
+        if not ball.Parent then
+            balls[ball] = nil
+        else
+            local data = ball:FindFirstChild("BallData")
+
+            if not bool(data,"Equipped") and (not character or not ball:IsDescendantOf(character)) then
+                local p = ballPos(ball)
+                local mag = p and (p-root.Position).Magnitude
+
+                if mag and mag < distance then
+                    closest, distance = ball, mag
+                end
+            end
+        end
+    end
+
+    return closest, distance
+end
+
+local function getHand(p)
+    if not character then return root end
+
+    local r = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+    local l = character:FindFirstChild("LeftHand") or character:FindFirstChild("Left Arm")
+
+    if r and l then
+        if (p-r.Position).Magnitude < (p-l.Position).Magnitude then
+            return r
+        end
+        return l
+    end
+
+    return r or l or root
+end
+
+local function getPart(ball)
+    if not ball or not ball.Parent then return end
+    if ball:IsA("BasePart") then return ball end
+    if ball:IsA("Model") then return ball.PrimaryPart or ball:FindFirstChildWhichIsA("BasePart",true) end
+end
+
+local function touch(a,b)
+    if not a or not b or not a.Parent or not b.Parent then return false end
+
+    local t = os.clock()
+    touches[a] = touches[a] or {}
+    if touches[a][b] and t-touches[a][b] < .07 then return false end
+    touches[a][b] = t
+
+    if type(firetouchinterest) == "function" then
+        firetouchinterest(a,b,0)
+        firetouchinterest(a,b,1)
+        return true
+    elseif type(firesignal) == "function" then
+        firesignal(a.Touched,b)
+        return true
+    end
+
+    return false
+end
+
+local function catch(ball)
+    local part = getPart(ball)
+    if not part or not character then return end
+
+    for _,name in {"Fake Right Arm","Fake Left Arm","RightHand","Right Arm","LeftHand","Left Arm"} do
+        local hand = character:FindFirstChild(name,true)
+        if hand and hand:IsA("BasePart") then
+            touch(hand,part)
+        end
+    end
+end
+
+local function velocity(ball,p,t)
+    if pullball ~= ball then
+        pullball, pullpos, pullvel, pullsample, lastcatch = ball, p, Vector3.zero, t, 0
+        return Vector3.zero
+    end
+
+    local dt = t-pullsample
+
+    if pullpos and dt >= 1/240 and dt <= .25 then
+        local v = (p-pullpos)/dt
+        if v.Magnitude > 180 then v = v.Unit*180 end
+        pullvel = pullvel:Lerp(v,math.clamp(dt*12,.18,.65))
+    elseif dt > .25 then
+        pullvel = Vector3.zero
+    end
+
+    pullpos, pullsample = p, t
+    return pullvel
+end
+
+local function stopPull(clamp)
+    if clamp and pulling and root and root.Parent then
+        local v = root.AssemblyLinearVelocity
+        local flat = Vector3.new(v.X,0,v.Z)
+        if flat.Magnitude > walkspeed and flat.Magnitude > .01 then flat = flat.Unit*walkspeed end
+        root.AssemblyLinearVelocity = Vector3.new(flat.X,math.clamp(v.Y,-jumppower,jumppower),flat.Z)
+    end
+
+    pulling, pullball, pullpos, pullvel, pullsample = false, nil, nil, Vector3.zero, 0
+end
+
+local function pull(dt)
+    if not root then
+        stopPull(false)
+        return
+    end
+
+    local t = os.clock()
+
+    if hasBall() then
+        if bool(session,"QBing") then throwing = math.max(throwing,t+.8) end
+        stopPull(true)
+        return
+    end
+
+    if t <= throwing then
+        stopPull(true)
+        return
+    end
+
+    local ball,dist = getBall()
+    if not ball or dist > range then return end
+
+    local p = ballPos(ball)
+    if not p then return end
+
+    local hand = getHand(p)
+    local origin = hand and hand.Position or root.Position
+    local vel = velocity(ball,p,t)
+    local hb = character and character:FindFirstChild("Hitbox")
+    local action = hb and hb:GetAttribute("Action") or "Catch"
+
+    local cth = math.clamp(getBuild("CTH") or 50,0,99)/99
+    local jmp = math.clamp(getBuild("JMP") or 50,0,99)/99
+    local spd = math.clamp(getBuild("SPD") or 50,0,99)/99
+    local wing = math.clamp(getBuild("Wingspan") or 72,60,90)
+    local jh = tonumber(character and character:GetAttribute("BadgeBaseJumpHeight")) or tonumber(humanoid and humanoid.JumpHeight) or 7.2
+    local topspd = tonumber(character and character:GetAttribute("BadgeTopSpeed")) or (18+spd*10)
+    local bj = (tonumber(player:GetAttribute("BadgeJumpVerticalFlyer")) or 0)+(tonumber(player:GetAttribute("BadgeJumpBallHawk")) or 0)+(tonumber(player:GetAttribute("BadgeJumpLadder")) or 0)
+    local scale = action == "Possession Catch" and .9 or 1
+    local horizontal = math.clamp(topspd*(1.35+spd*.35)*scale,30,52)
+    local radius = 5.5+cth*1.25+(wing-60)/30+(action == "One Hand Catch" and .65 or 0)
+    local response = .9+cth*.35
+    local jumpheight = math.clamp(jh+bj+jmp*2.25,5,18)
+
+    local diff = p-origin
+    local lead = math.clamp(diff.Magnitude/math.max(horizontal*strength,18),.04,.32)
+    local data = ball:FindFirstChild("BallData")
+    local gravity = (bool(data,"Thrown") or ball:GetAttribute("DeterministicFlight") == true) and Vector3.new(0,-passgravity,0) or Vector3.zero
+    local intercept = p+vel*lead+gravity*(.5*lead*lead)
+    local delta = intercept-origin
+    local handdist = delta.Magnitude
+
+    if handdist <= math.min(range,10) and t-lastcatch >= .4 then
+        local r = hitboxRemote()
+        if r then
+            r:FireServer("Catch",intercept,action)
+            lastcatch = t
+        end
+    end
+
+    if handdist <= radius then catch(ball) end
+    if handdist <= 1.1 then return end
+
+    local flat = Vector3.new(delta.X,0,delta.Z)
+    if flat.Magnitude < .01 and math.abs(delta.Y) < .01 then return end
+
+    local travel = math.clamp(handdist/math.max(horizontal*strength,12),.1,.45)
+    local wanted = Vector3.zero
+
+    if flat.Magnitude >= .01 then
+        wanted = flat.Unit*math.clamp(flat.Magnitude/travel,8,horizontal*strength)
+    end
+
+    local g = math.max(0,tonumber(game.Workspace.Gravity) or 196.2)
+    local y = (delta.Y+.5*g*travel*travel)/travel
+    local maxy = math.clamp(math.sqrt(2*g*jumpheight)*(.8+strength*.32),28,82)
+    wanted = Vector3.new(wanted.X,math.clamp(y,-32,maxy),wanted.Z)
+
+    pulling = true
+    root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(wanted,math.clamp((tonumber(dt) or .016)*12*response,0,.5))
+end
+
+local function movement()
+    if not humanoid or not root or humanoid.Health <= 0 then return end
+
+    humanoid.WalkSpeed = walkspeed
+    humanoid.UseJumpPower = true
+    humanoid.JumpPower = jumppower
+
+    if humanoid.MoveDirection.Magnitude > .05 and pulling == false then
+        local v = root.AssemblyLinearVelocity
+        local d = humanoid.MoveDirection.Unit*walkspeed
+        root.AssemblyLinearVelocity = Vector3.new(d.X,v.Y,d.Z)
+    end
+
+    local t = os.clock()
+    if t <= jump and t-lastjump >= .28 and humanoid.FloorMaterial ~= Enum.Material.Air then
+        lastjump, jump = t, 0
+        local v = root.AssemblyLinearVelocity
+        root.AssemblyLinearVelocity = Vector3.new(v.X,jumppower,v.Z)
+    end
+end
+
+local function setup(char)
+    character = char
+    if not character then return end
+
+    humanoid = character:FindFirstChildOfClass("Humanoid")
+    root = character:FindFirstChild("HumanoidRootPart")
+    local data = getData()
+    session = data and data:FindFirstChild("SessionData")
+
+
+    pullball, pullpos, pullvel, pullsample = nil, nil, Vector3.zero, 0
+    lastcatch, pulling, throwing, jump, lastjump = 0, false, 0, 0, 0
+end
+
+for _,v in game.Workspace:GetDescendants() do
+    addBall(v)
+end
+
+getgenv().rtgAdd = game.Workspace.DescendantAdded:Connect(addBall)
+getgenv().rtgRemove = game.Workspace.DescendantRemoving:Connect(function(v)
+    local visual = v.Name == "ReplaySourceBall" and v.Parent or v
+    if visual then visuals[visual] = nil end
+    balls[v] = nil
+end)
+
+setup(player.Character or player.CharacterAdded:Wait())
+
+getgenv().rtgChar = player.CharacterAdded:Connect(function(char)
+    task.wait(.15)
+    setup(char)
+end)
+
+getgenv().rtgJump = UIS.JumpRequest:Connect(function()
+    jump = os.clock()+.2
+end)
+
+getgenv().rtg = RS.PreSimulation:Connect(function(dt)
+    if character ~= player.Character or not root or not root.Parent then
+        setup(player.Character)
+        return
+    end
+
+    if not session or not session.Parent then
+        local data = getData()
+        session = data and data:FindFirstChild("SessionData")
+    end
+
+    movement()
+    pull(dt)
+end)
+
+if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
+    footballRemote()
+    hitboxRemote()
+
+    local old
+
+    local function hook(remote,...)
+        local args = {...}
+
+        if getnamecallmethod() == "FireServer" and remote == footballRemote() then
+            local action = args[1]
+
+            if action == "Begin Throw" then
+                throwing = math.max(throwing,os.clock()+2)
+            elseif action == "Throw" then
+                throwing = math.max(throwing,os.clock()+1.25)
+            elseif action == "Cancel Throw Pose" then
+                throwing = 0
+            end
+        end
+
+        return old(remote,table.unpack(args))
+    end
+
+    if type(newcclosure) == "function" then
+        old = hookmetamethod(game,"__namecall",newcclosure(hook))
+    else
+        old = hookmetamethod(game,"__namecall",hook)
+    end
+end
