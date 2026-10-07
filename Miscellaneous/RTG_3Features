@@ -1,11 +1,14 @@
 --// Created By CDHW/Kohrynth
 --// Road To Glory
 
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+
 local player = game.Players.LocalPlayer
 local RS = game.RunService
 local UIS = game.UserInputService
 local rep = game.ReplicatedStorage
 local range, walkspeed, jumppower, strength, passgravity = 18, 29, 61, .9, 72
+local pullEnabled = false
 
 if getgenv().rtg then
     getgenv().rtg:Disconnect()
@@ -403,8 +406,59 @@ getgenv().rtg = RS.PreSimulation:Connect(function(dt)
     end
 
     movement()
-    pull(dt)
+
+    if pullEnabled then
+        pull(dt)
+    elseif pulling then
+        stopPull(true)
+    end
 end)
+
+local window = Rayfield:CreateWindow({
+    name = "CDHW | Road To Glory",
+    subtitle = "Road To Glory",
+    sidebarLayout = true,
+})
+
+local main = window:CreateTab({
+    name = "Main",
+    icon = 0,
+})
+
+main:CreateToggle({
+    name = "Pull Vector",
+    callback = function(v)
+        pullEnabled = v
+        if not v then
+            stopPull(true)
+        end
+    end,
+})
+
+local playerTab = window:CreateTab({
+    name = "Player",
+    icon = 0,
+})
+
+playerTab:CreateSlider({
+    name = "Movement Speed",
+    range = {16,40},
+    increment = 1,
+    value = 29,
+    callback = function(v)
+        walkspeed = v
+    end,
+})
+
+playerTab:CreateSlider({
+    name = "Jump Power",
+    range = {40,90},
+    increment = 1,
+    value = 61,
+    callback = function(v)
+        jumppower = v
+    end,
+})
 
 if type(hookmetamethod) == "function" and type(getnamecallmethod) == "function" then
     footballRemote()
